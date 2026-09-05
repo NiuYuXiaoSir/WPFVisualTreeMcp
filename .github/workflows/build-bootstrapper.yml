@@ -1,0 +1,51 @@
+name: Build Bootstrapper DLLs
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/build-bootstrapper.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v1.3
+
+      - name: Build x64 (Release)
+        run: msbuild src/WpfVisualTreeMcp.Bootstrapper/WpfVisualTreeMcp.Bootstrapper.vcxproj /p:Configuration=Release /p:Platform=x64 /m /v:m
+
+      - name: Build x86 (Release)
+        run: msbuild src/WpfVisualTreeMcp.Bootstrapper/WpfVisualTreeMcp.Bootstrapper.vcxproj /p:Configuration=Release /p:Platform=Win32 /m /v:m
+
+      - name: Collect DLLs
+        shell: pwsh
+        run: |
+          $dlls = Get-ChildItem src/WpfVisualTreeMcp.Bootstrapper -Recurse -Filter WpfInspectorBootstrapper.dll | Where-Object { $_.FullName -match 'Release' }
+          $x64 = $dlls | Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
+          $x86 = $dlls | Where-Object { $_.FullName -notmatch '\\x64\\' } | Select-Object -First 1
+          New-Item -ItemType Directory -Force -Path artifacts/x64, artifacts/x86 | Out-Null
+          if ($x64) { Copy-Item $x64.FullName artifacts/x64/WpfInspectorBootstrapper.dll; Write-Host "x64: $($x64.FullName)" }
+          if ($x86) { Copy-Item $x86.FullName artifacts/x86/WpfInspectorBootstrapper.dll; Write-Host "x86: $($x86.FullName)" }
+          Get-ChildItem artifacts -Recurse -File | Select-Object FullName, Length
+
+      - name: Commit DLLs to bootstrapper-build
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add artifacts
+          git commit -m "ci: add built WpfInspectorBootstrapper.dll (x64/x86)" || echo "no changes"
+          git branch -f bootstrapper-build HEAD
+          git push origin bootstrapper-build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrapper
+          path: artifacts/
