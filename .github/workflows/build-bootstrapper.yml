@@ -19,21 +19,22 @@ jobs:
         uses: microsoft/setup-msbuild@v1.3
 
       - name: Build x64 (Release)
-        run: msbuild src/WpfVisualTreeMcp.Bootstrapper/WpfVisualTreeMcp.Bootstrapper.vcxproj /p:Configuration=Release /p:Platform=x64 /m /v:m
+        run: msbuild src/WpfVisualTreeMcp.Bootstrapper/WpfVisualTreeMcp.Bootstrapper.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=${{ github.workspace }}/build-out/x64/ /m /v:m
 
       - name: Build x86 (Release)
-        run: msbuild src/WpfVisualTreeMcp.Bootstrapper/WpfVisualTreeMcp.Bootstrapper.vcxproj /p:Configuration=Release /p:Platform=Win32 /m /v:m
+        run: msbuild src/WpfVisualTreeMcp.Bootstrapper/WpfVisualTreeMcp.Bootstrapper.vcxproj /p:Configuration=Release /p:Platform=Win32 /p:OutDir=${{ github.workspace }}/build-out/x86/ /m /v:m
 
       - name: Collect DLLs
         shell: pwsh
         run: |
-          # 输出目录：$(SolutionDir)build\$(Platform)\$(Configuration)\（见 vcxproj OutDir）
-          Get-ChildItem build -Recurse -Filter WpfInspectorBootstrapper.dll | Select-Object FullName, Length
-          $x64 = Get-ChildItem build -Recurse -Filter WpfInspectorBootstrapper.dll | Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
-          $x86 = Get-ChildItem build -Recurse -Filter WpfInspectorBootstrapper.dll | Where-Object { $_.FullName -notmatch '\\x64\\' } | Select-Object -First 1
+          # vcxproj 独立构建时 $(SolutionDir) 为空，OutDir 已在构建步骤显式注入为绝对路径
+          $x64 = 'build-out/x64/WpfInspectorBootstrapper.dll'
+          $x86 = 'build-out/x86/WpfInspectorBootstrapper.dll'
           New-Item -ItemType Directory -Force -Path artifacts/x64, artifacts/x86 | Out-Null
-          if ($x64) { Copy-Item $x64.FullName artifacts/x64/WpfInspectorBootstrapper.dll; Write-Host "x64: $($x64.FullName)" } else { Write-Host "x64 DLL 未找到"; exit 1 }
-          if ($x86) { Copy-Item $x86.FullName artifacts/x86/WpfInspectorBootstrapper.dll; Write-Host "x86: $($x86.FullName)" } else { Write-Host "x86 DLL 未找到"; exit 1 }
+          if (Test-Path $x64) { Copy-Item $x64 artifacts/x64/; Write-Host "x64 OK: $(Get-Item $x64 | Select-Object -ExpandProperty Length) bytes" }
+          else { Write-Host "x64 MISSING"; Get-ChildItem -Recurse -Depth 4 -Filter *.dll -ErrorAction SilentlyContinue | Select-Object FullName; exit 1 }
+          if (Test-Path $x86) { Copy-Item $x86 artifacts/x86/; Write-Host "x86 OK: $(Get-Item $x86 | Select-Object -ExpandProperty Length) bytes" }
+          else { Write-Host "x86 MISSING"; Get-ChildItem -Recurse -Depth 4 -Filter *.dll -ErrorAction SilentlyContinue | Select-Object FullName; exit 1 }
           Get-ChildItem artifacts -Recurse -File | Select-Object FullName, Length
 
       - name: Commit DLLs to bootstrapper-build
