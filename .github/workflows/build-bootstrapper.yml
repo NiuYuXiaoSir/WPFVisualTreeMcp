@@ -27,12 +27,13 @@ jobs:
       - name: Collect DLLs
         shell: pwsh
         run: |
-          $dlls = Get-ChildItem src/WpfVisualTreeMcp.Bootstrapper -Recurse -Filter WpfInspectorBootstrapper.dll | Where-Object { $_.FullName -match 'Release' }
-          $x64 = $dlls | Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
-          $x86 = $dlls | Where-Object { $_.FullName -notmatch '\\x64\\' } | Select-Object -First 1
+          # 输出目录：$(SolutionDir)build\$(Platform)\$(Configuration)\（见 vcxproj OutDir）
+          Get-ChildItem build -Recurse -Filter WpfInspectorBootstrapper.dll | Select-Object FullName, Length
+          $x64 = Get-ChildItem build -Recurse -Filter WpfInspectorBootstrapper.dll | Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
+          $x86 = Get-ChildItem build -Recurse -Filter WpfInspectorBootstrapper.dll | Where-Object { $_.FullName -notmatch '\\x64\\' } | Select-Object -First 1
           New-Item -ItemType Directory -Force -Path artifacts/x64, artifacts/x86 | Out-Null
-          if ($x64) { Copy-Item $x64.FullName artifacts/x64/WpfInspectorBootstrapper.dll; Write-Host "x64: $($x64.FullName)" }
-          if ($x86) { Copy-Item $x86.FullName artifacts/x86/WpfInspectorBootstrapper.dll; Write-Host "x86: $($x86.FullName)" }
+          if ($x64) { Copy-Item $x64.FullName artifacts/x64/WpfInspectorBootstrapper.dll; Write-Host "x64: $($x64.FullName)" } else { Write-Host "x64 DLL 未找到"; exit 1 }
+          if ($x86) { Copy-Item $x86.FullName artifacts/x86/WpfInspectorBootstrapper.dll; Write-Host "x86: $($x86.FullName)" } else { Write-Host "x86 DLL 未找到"; exit 1 }
           Get-ChildItem artifacts -Recurse -File | Select-Object FullName, Length
 
       - name: Commit DLLs to bootstrapper-build
