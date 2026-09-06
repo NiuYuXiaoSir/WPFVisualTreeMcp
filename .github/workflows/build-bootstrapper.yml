@@ -41,10 +41,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add artifacts
+          # 上游 .gitignore 忽略 artifacts/，必须 -f 强制加入
+          git add -f artifacts
           git commit -m "ci: add built WpfInspectorBootstrapper.dll (x64/x86)" || echo "no changes"
           git branch -f bootstrapper-build HEAD
-          git push origin bootstrapper-build
+          # 远端分支可能在早前失败运行中已存在，强制覆盖
+          git push --force origin bootstrapper-build
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
