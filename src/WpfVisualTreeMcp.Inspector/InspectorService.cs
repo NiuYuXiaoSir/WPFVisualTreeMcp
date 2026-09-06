@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
@@ -98,6 +99,8 @@ public class InspectorService : IDisposable
     {
         if (Instance != null) return;
 
+        BindSharedAssemblyToInspectorDirectory();
+
         lock (_initLock)
         {
             if (Instance != null) return; // Double-check after acquiring lock
@@ -117,6 +120,71 @@ public class InspectorService : IDisposable
                 throw;
             }
         }
+    }
+
+    /// <summary>
+    /// Makes the Inspector's dependency resolution independent of the target's AppBase.
+    ///
+    /// The Inspector is loaded via CLR hosting (ExecuteInDefaultAppDomain / hostfxr), so
+    /// its dependencies are probed in the TARGET app's base directory — not the
+    /// Inspector's own directory. If the target carries an older
+    /// <c>WpfVisualTreeMcp.Shared.dll</c> (deployed there for a previous Inspector
+    /// version), fusion binds that stale copy and every new Shared API throws
+    /// MissingMethodException. Two defenses:
+    ///
+    /// 1. Pre-load Shared from the Inspector's directory: an explicitly loaded assembly
+    ///    wins over later fusion probes (already-loaded assemblies match by simple name).
+    /// 2. An AssemblyResolve fallback for anything else the app's probe path can't find.
+    /// </summary>
+    private static void BindSharedAssemblyToInspectorDirectory()
+    {
+        try
+        {
+            var inspectorDir = Path.GetDirectoryName(
+                typeof(InspectorService).Assembly.Location);
+            if (string.IsNullOrEmpty(inspectorDir))
+            {
+                return;
+            }
+
+            var sharedPath = Path.Combine(inspectorDir, "WpfVisualTreeMcp.Shared.dll");
+            if (File.Exists(sharedPath))
+            {
+                Assembly.LoadFrom(sharedPath);
+                DebugLog($"Pre-loaded Shared assembly from {sharedPath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            DebugLog($"Shared pre-load failed (will rely on default probing): {ex.Message}");
+        }
+
+        AppDomain.CurrentDomain.AssemblyResolve += (sender, args) =>
+        {
+            try
+            {
+                var inspectorDir = Path.GetDirectoryName(
+                    typeof(InspectorService).Assembly.Location);
+                if (string.IsNullOrEmpty(inspectorDir))
+                {
+                    return null;
+                }
+
+                var name = new AssemblyName(args.Name).Name;
+                var candidate = Path.Combine(inspectorDir, name + ".dll");
+                if (!File.Exists(candidate))
+                {
+                    return null;
+                }
+
+                DebugLog($"AssemblyResolve: loading {args.Name} from {candidate}");
+                return Assembly.LoadFrom(candidate);
+            }
+            catch
+            {
+                return null;
+            }
+        };
     }
 
     private InspectorService(int processId)

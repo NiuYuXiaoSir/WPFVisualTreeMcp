@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cross-window `wpf_find_elements` / `wpf_find_elements_deep` merging is real JSON
   merging** (`IpcSerializer.MergeElementArrays`), not `IndexOf('[')`/`LastIndexOf(']')`
   string surgery that could corrupt results when element text contains brackets.
+- **The injected Inspector binds its own Shared assembly, not the target's stale
+  copy.** Dependencies of the CLR-hosted Inspector were probed in the target app's
+  base directory, so a target carrying an older `WpfVisualTreeMcp.Shared.dll`
+  (deployed next to its exe for a previous Inspector version) caused
+  `MissingMethodException` on every new API. The Inspector now pre-loads Shared from
+  its own directory (an explicitly loaded assembly wins over later fusion probes)
+  and installs an `AssemblyResolve` fallback; targets no longer need a Shared.dll
+  deployed into their output directory at all.
 - **`Dispatcher` timeout errors are actionable**: they now say what to check (modal
   `MessageBox`/`ShowDialog`, long synchronous work) instead of a bare "UI thread is busy".
 
