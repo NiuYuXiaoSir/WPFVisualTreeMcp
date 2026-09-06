@@ -38,6 +38,14 @@ jobs:
     - name: Build Release
       run: dotnet build WpfVisualTreeMcp.sln --no-restore --configuration Release
 
+    # Same as build.yml: standalone vcxproj builds have an empty $(SolutionDir), so
+    # OutDir must be explicit — and must target the directories the Server csproj's
+    # Exists()-guarded <None Include> items collect from.
+    - name: Build native bootstrapper (x64 + Win32)
+      run: |
+        msbuild src/WpfVisualTreeMcp.Bootstrapper/WpfVisualTreeMcp.Bootstrapper.vcxproj /p:Configuration=Release /p:Platform=x64 "/p:OutDir=${{ github.workspace }}/src/WpfVisualTreeMcp.Bootstrapper/build/x64/Release/" /m /v:m
+        msbuild src/WpfVisualTreeMcp.Bootstrapper/WpfVisualTreeMcp.Bootstrapper.vcxproj /p:Configuration=Release /p:Platform=Win32 "/p:OutDir=${{ github.workspace }}/src/WpfVisualTreeMcp.Bootstrapper/build/Win32/Release/" /m /v:m
+
     - name: Test
       run: dotnet test WpfVisualTreeMcp.sln --no-build --configuration Release --verbosity normal
 

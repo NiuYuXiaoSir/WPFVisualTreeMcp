@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -73,5 +75,43 @@ public static class IpcSerializer
     public static T? DeserializeResponse<T>(string json) where T : IpcResponse
     {
         return JsonSerializer.Deserialize<T>(json, Options);
+    }
+
+    /// <summary>
+    /// Merges multiple FindElements-style JSON documents ({"elements":[...],"count":N})
+    /// into one document with a concatenated elements array. Each input is parsed as
+    /// JSON — no delimiter string surgery, which breaks on string values containing
+    /// brackets. Input order is preserved; the output count is the true element total.
+    /// </summary>
+    public static string MergeElementArrays(IEnumerable<string> documents)
+    {
+        var buffer = new StringBuilder("{\"elements\":[");
+        var total = 0;
+        var first = true;
+
+        foreach (var json in documents)
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("elements", out var elements) ||
+                elements.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var element in elements.EnumerateArray())
+            {
+                if (!first)
+                {
+                    buffer.Append(',');
+                }
+
+                first = false;
+                buffer.Append(element.GetRawText());
+                total++;
+            }
+        }
+
+        buffer.Append("],\"count\":").Append(total).Append('}');
+        return buffer.ToString();
     }
 }

@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
+using System.Windows.Interop;
 using System.Windows.Media;
 
 namespace WpfVisualTreeMcp.Inspector;
@@ -831,21 +833,116 @@ public class TreeWalker
     }
 
     /// <summary>
-    /// Gets all root elements to search across, including all open windows and popups.
+    /// Gets all root elements to search across: every open Application window plus every
+    /// HWND owned by this process that carries WPF content (via its PresentationSource).
+    /// The HWND sweep reaches what <see cref="Application.Current"/>.Windows cannot see:
+    /// WPF content hosted inside ElementHost (WinForms interop hosts, e.g. plugin panels
+    /// inside a native shell process), windows created before an Application existed,
+    /// and open Popup HWNDs. Must be called on a Dispatcher thread.
     /// </summary>
     public static List<DependencyObject> GetAllSearchRoots()
     {
         var roots = new List<DependencyObject>();
-        var app = Application.Current;
-        if (app == null) return roots;
+        var seen = new HashSet<DependencyObject>();
 
-        foreach (Window window in app.Windows)
+        var app = Application.Current;
+        if (app != null)
         {
-            roots.Add(window);
+            foreach (Window window in app.Windows)
+            {
+                if (window != null && seen.Add(window))
+                    roots.Add(window);
+            }
+        }
+
+        foreach (var source in EnumProcessHwndSources())
+        {
+            var root = source.RootVisual;
+            if (root != null && seen.Add(root))
+                roots.Add(root);
         }
 
         return roots;
     }
+
+    /// <summary>
+    /// Enumerates the distinct WPF <see cref="HwndSource"/>s of this process by sweeping
+    /// its top-level windows and (one level of) child windows — child windows reach
+    /// ElementHost-hosted content that EnumWindows alone misses. Non-WPF HWNDs simply
+    /// yield no presentation source and are skipped. Failures on individual HWNDs
+    /// (cross-thread surprises, disposing sources) are isolated and skipped.
+    /// </summary>
+    private static IEnumerable<HwndSource> EnumProcessHwndSources()
+    {
+        var currentPid = GetCurrentProcessId();
+        var hwnds = new List<IntPtr>();
+
+        try
+        {
+            EnumWindows((hWnd, _) =>
+            {
+                GetWindowThreadProcessId(hWnd, out var pid);
+                if (IsWindowVisible(hWnd) && pid == currentPid)
+                {
+                    hwnds.Add(hWnd);
+                }
+                return true;
+            }, IntPtr.Zero);
+        }
+        catch (Exception)
+        {
+            yield break;
+        }
+
+        // One level of children: WinForms form (top-level, non-WPF) → ElementHost (child HWND).
+        var childHwnds = new List<IntPtr>();
+        foreach (var hwnd in hwnds)
+        {
+            EnumChildWindows(hwnd, (child, _) =>
+            {
+                childHwnds.Add(child);
+                return true; // enumerate all descendants
+            }, IntPtr.Zero);
+        }
+
+        var seenSources = new HashSet<IntPtr>();
+        foreach (var hwnd in hwnds.Concat(childHwnds))
+        {
+            HwndSource? source = null;
+            try
+            {
+                source = HwndSource.FromHwnd(hwnd);
+            }
+            catch (Exception)
+            {
+                // Not (or no longer) a WPF HWND — skip.
+            }
+
+            if (source != null && seenSources.Add(hwnd))
+            {
+                yield return source;
+            }
+        }
+    }
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentProcessId();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
     private static string EscapeXml(string? text)
     {

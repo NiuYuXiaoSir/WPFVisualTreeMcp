@@ -473,12 +473,13 @@ public class WpfTools
     }
 
     [McpServerTool]
-    [Description("Capture a screenshot of the WPF window or a specific element. Returns an image that can be visually analyzed. Use element_handle to capture a specific element, or omit for the entire window. mode='render' (default) re-renders the visual off-screen — works even if the window is covered, but CANNOT see open Popups, ComboBox dropdowns, context menus or tooltips. mode='screen' captures the actual on-screen pixels (GDI) and DOES include them — use it right after clicking something that opened a popup/menu; requires the window to be visible and unobstructed.")]
+    [Description("Capture a screenshot of the WPF window or a specific element. Returns an image that can be visually analyzed. Use element_handle to capture a specific element, or omit for the entire window. mode='render' (default) re-renders the visual off-screen — works even if the window is covered, but CANNOT see open Popups, ComboBox dropdowns, context menus or tooltips. mode='screen' captures the actual on-screen pixels (GDI) and DOES include them — use it right after clicking something that opened a popup/menu; requires the window to be visible and not minimized. In screen mode activate_first=true (default false) activates the host window before capturing so an occluding window is not captured instead — note this steals focus; with the default, capturing never disturbs the foreground window.")]
     public async Task<CallToolResult> WpfCaptureScreenshot(
         string? element_handle = null,
         int max_width = 1920,
         int max_height = 1080,
-        string mode = "render")
+        string mode = "render",
+        bool activate_first = false)
     {
         if (max_width < 1) max_width = 1;
         if (max_width > 3840) max_width = 3840;
@@ -489,7 +490,7 @@ public class WpfTools
             throw new ArgumentException("mode must be 'render' or 'screen'");
         }
 
-        var result = await _ipcBridge.CaptureScreenshotAsync(element_handle, max_width, max_height, mode);
+        var result = await _ipcBridge.CaptureScreenshotAsync(element_handle, max_width, max_height, mode, activate_first);
 
         var content = new List<ContentBlock>
         {

@@ -30,6 +30,19 @@ jobs:
     - name: Build
       run: dotnet build WpfVisualTreeMcp.sln --no-restore --configuration Release
 
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.3
+
+    # Build the native bootstrapper into the exact directories the Server csproj's
+    # Exists()-guarded <None Include> items collect from, so `dotnet publish` below
+    # emits a COMPLETE, locally-testable layout (server + inspector + native/x64 +
+    # native/x86). Standalone vcxproj builds have an empty $(SolutionDir), so OutDir
+    # must be passed explicitly.
+    - name: Build native bootstrapper (x64 + Win32)
+      run: |
+        msbuild src/WpfVisualTreeMcp.Bootstrapper/WpfVisualTreeMcp.Bootstrapper.vcxproj /p:Configuration=Release /p:Platform=x64 "/p:OutDir=${{ github.workspace }}/src/WpfVisualTreeMcp.Bootstrapper/build/x64/Release/" /m /v:m
+        msbuild src/WpfVisualTreeMcp.Bootstrapper/WpfVisualTreeMcp.Bootstrapper.vcxproj /p:Configuration=Release /p:Platform=Win32 "/p:OutDir=${{ github.workspace }}/src/WpfVisualTreeMcp.Bootstrapper/build/Win32/Release/" /m /v:m
+
     - name: Test
       run: dotnet test WpfVisualTreeMcp.sln --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=test-results.trx"
 
@@ -42,6 +55,22 @@ jobs:
 
     - name: Publish MCP Server
       run: dotnet publish src/WpfVisualTreeMcp.Server/WpfVisualTreeMcp.Server.csproj --no-build --configuration Release --output ./publish
+
+    - name: Verify publish completeness
+      shell: pwsh
+      run: |
+        $required = @(
+          'WpfVisualTreeMcp.Server.exe',
+          'WpfVisualTreeMcp.Inspector.dll',
+          'native/x64/WpfInspectorBootstrapper.dll',
+          'native/x86/WpfInspectorBootstrapper.dll',
+          'native/x64/WpfVisualTreeMcp.Inspector.dll',
+          'native/x86/WpfVisualTreeMcp.Inspector.dll',
+          'native/x86/WpfInjectorHelper.exe'
+        )
+        $missing = @($required | Where-Object { -not (Test-Path (Join-Path './publish' $_)) })
+        if ($missing.Count -gt 0) { Write-Host "MISSING FROM PUBLISH:"; $missing | ForEach-Object { Write-Host "  $_" }; exit 1 }
+        Write-Host "Publish layout complete:"; Get-ChildItem -Recurse ./publish/native | Select-Object FullName, Length
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4

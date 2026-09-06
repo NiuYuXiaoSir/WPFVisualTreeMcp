@@ -205,15 +205,7 @@ public class IpcServer : IDisposable
 
     private static void DebugLog(string message)
     {
-        try
-        {
-            var logPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "WpfInspector_Debug.log");
-            System.IO.File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}\n");
-        }
-        catch
-        {
-            // Ignore logging errors
-        }
+        InspectorLog.Debug(message);
     }
 
     private async Task<string> ProcessRequestAsync(string requestJson)

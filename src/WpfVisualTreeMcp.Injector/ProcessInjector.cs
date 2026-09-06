@@ -335,7 +335,10 @@ public class ProcessInjector
     }
 
     /// <summary>
-    /// Checks if the Inspector DLL is already loaded in a process.
+    /// Checks whether the native bootstrapper DLL is already loaded in a process
+    /// (i.e. an injection already happened). The managed Inspector itself can never
+    /// be detected this way: assemblies loaded through CLR hosting do not appear in
+    /// the native module list.
     /// </summary>
     public bool IsInspectorLoaded(Process process)
     {
@@ -343,7 +346,7 @@ public class ProcessInjector
         {
             foreach (ProcessModule module in process.Modules)
             {
-                if (module.ModuleName.Equals("WpfVisualTreeMcp.Inspector.dll", StringComparison.OrdinalIgnoreCase))
+                if (module.ModuleName.Equals("WpfInspectorBootstrapper.dll", StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }

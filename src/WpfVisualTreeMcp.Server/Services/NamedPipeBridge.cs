@@ -467,7 +467,7 @@ public class NamedPipeBridge : IIpcBridge
         };
     }
 
-    public async Task<ScreenshotResult> CaptureScreenshotAsync(string? elementHandle, int maxWidth, int maxHeight, string mode = "render")
+    public async Task<ScreenshotResult> CaptureScreenshotAsync(string? elementHandle, int maxWidth, int maxHeight, string mode = "render", bool activateFirst = false)
     {
         var session = EnsureConnected();
 
@@ -476,7 +476,8 @@ public class NamedPipeBridge : IIpcBridge
             ElementHandle = elementHandle,
             MaxWidth = maxWidth,
             MaxHeight = maxHeight,
-            Mode = mode
+            Mode = mode,
+            ActivateFirst = activateFirst
         };
 
         var response = await SendRequestAsync<CaptureScreenshotRequest, CaptureScreenshotResponse>(

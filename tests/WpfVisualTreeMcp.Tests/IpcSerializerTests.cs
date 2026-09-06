@@ -211,3 +211,56 @@ public class IpcSerializerTests
         roundTripped.Physical.Should().BeFalse();
     }
 }
+
+/// <summary>
+/// Regression tests for cross-window find-result merging. The merge used to be
+/// IndexOf('[')/LastIndexOf(']') string surgery, which could corrupt or drop elements
+/// when a string value contained brackets.
+/// </summary>
+public class MergeElementArraysTests
+{
+    [Fact]
+    public void Merge_ConcatenatesElementsAndCounts()
+    {
+        var merged = IpcSerializer.MergeElementArrays(new[]
+        {
+            "{\"elements\":[{\"name\":\"A\"},{\"name\":\"B\"}],\"count\":2}",
+            "{\"elements\":[{\"name\":\"C\"}],\"count\":1}"
+        });
+
+        using var doc = JsonDocument.Parse(merged);
+        var root = doc.RootElement;
+        root.GetProperty("count").GetInt32().Should().Be(3);
+        var names = root.GetProperty("elements")
+            .EnumerateArray()
+            .Select(e => e.GetProperty("name").GetString())
+            .Should().Equal("A", "B", "C");
+    }
+
+    [Fact]
+    public void Merge_PreservesElementsContainingBrackets()
+    {
+        var merged = IpcSerializer.MergeElementArrays(new[]
+        {
+            "{\"elements\":[{\"text\":\"存量[1] 与}特殊的 \\\"值\",\"name\":\"X\"}],\"count\":1}",
+            "{\"elements\":[],\"count\":0}"
+        });
+
+        using var doc = JsonDocument.Parse(merged);
+        var root = doc.RootElement;
+        root.GetProperty("count").GetInt32().Should().Be(1);
+        root.GetProperty("elements").EnumerateArray().Single()
+            .GetProperty("text").GetString().Should().Be("存量[1] 与}特殊的 \"值");
+    }
+
+    [Fact]
+    public void Merge_EmptyInputs_YieldsEmptyArrayWithZeroCount()
+    {
+        var merged = IpcSerializer.MergeElementArrays(Array.Empty<string>());
+
+        using var doc = JsonDocument.Parse(merged);
+        var root = doc.RootElement;
+        root.GetProperty("count").GetInt32().Should().Be(0);
+        root.GetProperty("elements").EnumerateArray().Should().BeEmpty();
+    }
+}

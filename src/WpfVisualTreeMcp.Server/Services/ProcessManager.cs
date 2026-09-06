@@ -128,17 +128,20 @@ public class ProcessManager : IProcessManager
         _logger.LogInformation("Attached to process {ProcessId} ({ProcessName})",
             targetProcess.Id, targetProcess.ProcessName);
 
-        // Check if Inspector is already loaded (self-hosted mode)
-        var inspectorLoaded = IsInspectorLoaded(targetProcess);
-        if (inspectorLoaded)
+        // Probe the inspector's named pipe first. It covers BOTH self-hosted mode (the
+        // target app hosts the inspector itself) and re-attach to a previously injected
+        // process. Module enumeration cannot detect the managed Inspector: assemblies
+        // loaded through CLR hosting never appear in process.Modules.
+        var inspectorActive = await IsInspectorActiveAsync(targetProcess.Id);
+        if (inspectorActive)
         {
-            _logger.LogInformation("Inspector DLL already loaded in target process (self-hosted mode)");
-            session.InspectorStatus = "Loaded (self-hosted)";
+            _logger.LogInformation("Inspector pipe already active in process {ProcessId}", targetProcess.Id);
+            session.InspectorStatus = "Loaded (active)";
         }
         else if (autoInject)
         {
             // Attempt to inject the Inspector DLL
-            _logger.LogInformation("Inspector not loaded, attempting injection...");
+            _logger.LogInformation("Inspector not active, attempting injection...");
             try
             {
                 var inspectorPath = _injector.GetInspectorDllPath();
@@ -146,8 +149,10 @@ public class ProcessManager : IProcessManager
 
                 if (result)
                 {
-                    // Wait for the Inspector to initialize and create its named pipe
-                    var pipeConnected = await WaitForInspectorPipeAsync(targetProcess.Id, TimeSpan.FromSeconds(10));
+                    // Wait for the Inspector to initialize and create its named pipe.
+                    // First-time CLR hosting inside a large process (e.g. a native shell
+                    // host like NX) can take well over 10s, so wait up to 30s.
+                    var pipeConnected = await WaitForInspectorPipeAsync(targetProcess.Id, TimeSpan.FromSeconds(30));
                     if (pipeConnected)
                     {
                         _logger.LogInformation("Inspector successfully injected and initialized");
@@ -155,8 +160,10 @@ public class ProcessManager : IProcessManager
                     }
                     else
                     {
-                        _logger.LogWarning("Inspector injected but named pipe not available");
-                        session.InspectorStatus = "Injected - pipe timeout";
+                        _logger.LogWarning("Inspector injected but named pipe not available after 30s");
+                        session.InspectorStatus = "Injected - pipe timeout. Inspector may still be initializing; " +
+                            "retry attach in a moment, or check the target process's " +
+                            "%TEMP%\\WpfInspectorBootstrapper.log and %TEMP%\\WpfInspector_Debug_{pid}.log";
                     }
                 }
                 else
@@ -218,24 +225,36 @@ public class ProcessManager : IProcessManager
         return false;
     }
 
-    private bool IsInspectorLoaded(Process process)
+    /// <summary>
+    /// Probes whether an Inspector is already running in the target process, by
+    /// attempting a short connection to its named pipe
+    /// (<c>wpf_inspector_{processId}</c>).
+    /// </summary>
+    private static async Task<bool> IsInspectorActiveAsync(int processId)
     {
+        var pipeName = $"wpf_inspector_{processId}";
         try
         {
-            foreach (ProcessModule module in process.Modules)
-            {
-                if (module.ModuleName.Equals("WpfVisualTreeMcp.Inspector.dll", StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
+            using var pipeClient = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            await pipeClient.ConnectAsync(500);
+            return true;
         }
-        catch (Exception ex)
+        catch (TimeoutException)
         {
-            _logger.LogDebug(ex, "Could not check loaded modules for process {ProcessId}", process.Id);
+            // Pipe doesn't exist (yet)
+            return false;
         }
-
-        return false;
+        catch (IOException)
+        {
+            // Pipe doesn't exist (yet)
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Pipe exists but was created by a different user / elevation level.
+            // Treat as active: an inspector is there, we just can't reach it from here.
+            return true;
+        }
     }
 
     public Task DetachAsync(string sessionId)

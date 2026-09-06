@@ -368,6 +368,14 @@ public class CaptureScreenshotRequest : IpcRequest
     /// includes open Popups, ComboBox dropdowns, context menus and tooltips.
     /// </summary>
     public string Mode { get; set; } = "render";
+
+    /// <summary>
+    /// Screen mode only: when true, activate the host window before capturing so the
+    /// capture is not of an occluding window (steals focus). Default false — capturing
+    /// never disturbs the foreground window; an occluded element then captures whatever
+    /// pixels actually cover it.
+    /// </summary>
+    public bool ActivateFirst { get; set; }
 }
 
 public class CaptureScreenshotResponse : IpcResponse

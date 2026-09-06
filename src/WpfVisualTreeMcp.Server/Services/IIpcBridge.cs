@@ -117,9 +117,11 @@ public interface IIpcBridge
     /// Captures a screenshot of the target window or element.
     /// <paramref name="mode"/> "render" (default) re-renders the visual off-screen;
     /// "screen" captures the on-screen pixels via GDI, including open Popups,
-    /// ComboBox dropdowns, context menus and tooltips.
+    /// ComboBox dropdowns, context menus and tooltips. In screen mode,
+    /// <paramref name="activateFirst"/> (default false) activates the host window before
+    /// capturing so an occluding window is not captured (steals focus).
     /// </summary>
-    Task<ScreenshotResult> CaptureScreenshotAsync(string? elementHandle, int maxWidth, int maxHeight, string mode = "render");
+    Task<ScreenshotResult> CaptureScreenshotAsync(string? elementHandle, int maxWidth, int maxHeight, string mode = "render", bool activateFirst = false);
 
     /// <summary>
     /// Gets the DataContext chain for an element.

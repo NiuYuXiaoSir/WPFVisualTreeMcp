@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-09-06
+
+> First release maintained by the NiuYuXiaoSir fork, focused on reliability for
+> long-running native-shell hosts (e.g. Siemens NX) and CI-produced complete artifacts.
+
+### Fixed
+
+- **Inspector logging no longer touches the file system on the UI thread.** Every
+  request used to perform multiple synchronous `File.AppendAllText` calls — including
+  inside the `Dispatcher.Invoke` callback and once per 4 KB pipe chunk — adding latency
+  to every tool call and growing `%TEMP%` without bound. Logging is now queued to a
+  single background writer (`InspectorLog`): per-process file
+  `%TEMP%\WpfInspector_Debug_{pid}.log`, rotated at 5 MB to a `.old` file, disable with
+  `WPF_INSPECTOR_DEBUG=0` in the target process environment.
+- **`wpf_attach` no longer misdetects an already-injected target.** Detection used to
+  look for the managed Inspector DLL in the native module list — assemblies loaded via
+  CLR hosting never appear there, so the fast path never triggered. Both the server
+  (`ProcessManager`) and the injector now use reliable signals: a short named-pipe
+  probe (covers self-hosted mode and re-attach) and the native bootstrapper module.
+- **Injection readiness window 10s → 30s.** First-time CLR hosting inside a large
+  process (e.g. a native shell host) can take well over 10 seconds; the pipe wait now
+  matches that reality and the timeout message points at the concrete log files.
+- **Cross-window `wpf_find_elements` / `wpf_find_elements_deep` merging is real JSON
+  merging** (`IpcSerializer.MergeElementArrays`), not `IndexOf('[')`/`LastIndexOf(']')`
+  string surgery that could corrupt results when element text contains brackets.
+- **`Dispatcher` timeout errors are actionable**: they now say what to check (modal
+  `MessageBox`/`ShowDialog`, long synchronous work) instead of a bare "UI thread is busy".
+
+### Changed
+
+- **`wpf_capture_screenshot` no longer steals focus in screen mode.** The implicit
+  host-window `Activate()` is now opt-in via `activate_first=true` (default false);
+  capturing an occluded element then captures whatever pixels actually cover it.
+- **Search roots include interop HWNDs.** `wpf_find_elements` / `wpf_get_visual_tree`
+  root discovery now sweeps the process's top-level and child HWNDs for WPF
+  `HwndSource`s, reaching content `Application.Current.Windows` cannot see:
+  ElementHost-hosted WPF inside WinForms hosts (e.g. plugin panels inside a native
+  shell), windows created before an `Application` existed, and open Popup HWNDs.
+- **CI produces a complete, locally-testable artifact.** `build.yml`/`release.yml` now
+  build the native bootstrapper (x64 + Win32) into the directories the Server publish
+  collects from, verify the publish layout (server + inspector + native/x64 +
+  native/x86 + injector helper), and upload one self-contained `wpf-visual-tree-mcp`
+  artifact — no more assembling pieces from a separate bootstrapper branch.
+
 ## [0.12.0] - 2026-07-24
 
 ### Added

@@ -200,7 +200,14 @@ public class InspectorService : IDisposable
         catch (TimeoutException)
         {
             DebugLog($"TIMEOUT in HandleRequestAsync: Dispatcher is busy or blocked");
-            return new GetVisualTreeResponse { Success = false, Error = "Request timeout: UI thread is busy" };
+            return new GetVisualTreeResponse
+            {
+                Success = false,
+                Error = "Request timeout: the UI thread did not process the request within 10s. " +
+                        "It is busy or blocked — most often a modal MessageBox/ShowDialog or a long " +
+                        "synchronous operation. Close any modal dialog (the modal loop usually still " +
+                        "pumps Dispatcher operations, so a retry may succeed) and retry."
+            };
         }
         catch (Exception ex)
         {
@@ -211,15 +218,7 @@ public class InspectorService : IDisposable
 
     private static void DebugLog(string message)
     {
-        try
-        {
-            var logPath = Path.Combine(Path.GetTempPath(), "WpfInspector_Debug.log");
-            File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}\n");
-        }
-        catch
-        {
-            // Ignore logging errors
-        }
+        InspectorLog.Debug(message);
     }
 
     private IpcResponse HandleRequest(string requestType, JsonElement data)
@@ -365,18 +364,16 @@ public class InspectorService : IDisposable
             };
         }
 
-        // No root specified: search across ALL windows for maximum coverage
+        // No root specified: search across ALL roots (windows + interop HwndSources)
         var allRoots = TreeWalker.GetAllSearchRoots();
         if (allRoots.Count == 0)
         {
             return new FindElementsResponse { Success = false, Error = "No root element found" };
         }
 
-        // Search each window, accumulating results
-        var allResults = new System.Text.StringBuilder();
-        allResults.Append("{\"elements\":[");
+        // Search each root, respecting the global result cap
+        var perRoot = new List<string>();
         int totalCount = 0;
-        bool first = true;
 
         foreach (var root in allRoots)
         {
@@ -385,26 +382,15 @@ public class InspectorService : IDisposable
             var count = ParseJsonCount(json);
             if (count > 0)
             {
-                // Extract elements array content from {"elements":[...],"count":N}
-                var elemStart = json.IndexOf('[') + 1;
-                var elemEnd = json.LastIndexOf(']');
-                if (elemStart > 0 && elemEnd > elemStart)
-                {
-                    if (!first) allResults.Append(",");
-                    first = false;
-                    allResults.Append(json.Substring(elemStart, elemEnd - elemStart));
-                    totalCount += count;
-                }
+                perRoot.Add(json);
+                totalCount += count;
             }
         }
-
-        allResults.Append($"],\"count\":{totalCount}}}");
-        var resultJson = allResults.ToString();
 
         return new FindElementsResponse
         {
             RequestId = request?.RequestId ?? "",
-            ElementsJson = resultJson,
+            ElementsJson = IpcSerializer.MergeElementArrays(perRoot),
             Count = totalCount
         };
     }
@@ -434,17 +420,15 @@ public class InspectorService : IDisposable
             };
         }
 
-        // No root specified: search across ALL windows
+        // No root specified: search across ALL roots (windows + interop HwndSources)
         var allRoots = TreeWalker.GetAllSearchRoots();
         if (allRoots.Count == 0)
         {
             return new FindElementsDeepResponse { Success = false, Error = "No root element found" };
         }
 
-        var allResults = new System.Text.StringBuilder();
-        allResults.Append("{\"elements\":[");
+        var perRoot = new List<string>();
         int totalCount = 0;
-        bool first = true;
 
         foreach (var root in allRoots)
         {
@@ -452,25 +436,15 @@ public class InspectorService : IDisposable
             var count = ParseJsonCount(json);
             if (count > 0)
             {
-                var elemStart = json.IndexOf('[') + 1;
-                var elemEnd = json.LastIndexOf(']');
-                if (elemStart > 0 && elemEnd > elemStart)
-                {
-                    if (!first) allResults.Append(",");
-                    first = false;
-                    allResults.Append(json.Substring(elemStart, elemEnd - elemStart));
-                    totalCount += count;
-                }
+                perRoot.Add(json);
+                totalCount += count;
             }
         }
-
-        allResults.Append($"],\"count\":{totalCount},\"truncated\":false}}");
-        var resultJson = allResults.ToString();
 
         return new FindElementsDeepResponse
         {
             RequestId = request?.RequestId ?? "",
-            ElementsJson = resultJson,
+            ElementsJson = IpcSerializer.MergeElementArrays(perRoot),
             Count = totalCount
         };
     }
@@ -1105,7 +1079,7 @@ public class InspectorService : IDisposable
             var maxHeight = request?.MaxHeight ?? 1080;
 
             var (base64, width, height) = mode == "screen"
-                ? screenshotCapture.CaptureScreen(element, maxWidth, maxHeight)
+                ? screenshotCapture.CaptureScreen(element, maxWidth, maxHeight, request?.ActivateFirst ?? false)
                 : screenshotCapture.CaptureElement(element, maxWidth, maxHeight);
 
             return new CaptureScreenshotResponse

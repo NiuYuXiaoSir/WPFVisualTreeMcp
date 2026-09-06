@@ -99,19 +99,29 @@ public class ScreenshotCapture
     /// window), via GDI BitBlt. Unlike <see cref="CaptureElement"/> (which re-renders
     /// the visual off-screen), this includes open Popups, ComboBox dropdowns, context
     /// menus and tooltips — they live in separate HWNDs that RenderTargetBitmap never
-    /// sees. Requires the window to be visible on screen (not minimized or covered).
+    /// sees. Requires the window to be visible on screen (not minimized).
     /// </summary>
+    /// <param name="element">The element to capture.</param>
+    /// <param name="maxWidth">Maximum width in pixels (downscales if exceeded).</param>
+    /// <param name="maxHeight">Maximum height in pixels (downscales if exceeded).</param>
+    /// <param name="activateFirst">
+    /// When true, activates the host window before capturing so an occluding window
+    /// is not captured instead (steals focus). Default false: the foreground window is
+    /// left untouched — an occluded element then captures whatever pixels cover it.
+    /// </param>
     public (string base64, int width, int height) CaptureScreen(
-        UIElement element, int maxWidth = 1920, int maxHeight = 1080)
+        UIElement element, int maxWidth = 1920, int maxHeight = 1080, bool activateFirst = false)
     {
         if (PresentationSource.FromVisual(element) == null || !element.IsVisible)
             throw new InvalidOperationException(
                 "Element is not rendered on screen; screen capture needs a visible element. " +
                 "Use the default render mode for off-screen captures.");
 
-        // Bring the host window forward so the capture isn't of an occluding window.
-        var window = Window.GetWindow(element);
-        window?.Activate();
+        if (activateFirst)
+        {
+            // Bring the host window forward so the capture isn't of an occluding window.
+            Window.GetWindow(element)?.Activate();
+        }
 
         var topLeft = element.PointToScreen(new Point(0, 0));
         var bottomRight = element.PointToScreen(
